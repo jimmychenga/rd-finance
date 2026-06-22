@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useSummary, useTransactions, useBudgetTargets, useFlags, useTicketAnalytics } from '../hooks/useApi.js';
+import { useSummary, useTransactions, useBudgetTargets, useFlags, useTicketAnalytics, useUpdateBudgetTarget } from '../hooks/useApi.js';
 import { Card, MetricCard } from '../components/Card.jsx';
 import { BudgetBar } from '../components/BudgetBar.jsx';
 import { MoneyMapScore } from '../components/MoneyMapScore.jsx';
@@ -20,6 +20,7 @@ export function Dashboard() {
   const { data: budgetTargets = [] } = useBudgetTargets(month, year);
   const { data: flags = [] } = useFlags(month, year);
   const { data: jttAnalytics } = useTicketAnalytics(year);
+  const updateTarget = useUpdateBudgetTarget();
 
   const targetMap = Object.fromEntries(budgetTargets.map(t => [t.category, t.target_amount]));
 
@@ -31,19 +32,25 @@ export function Dashboard() {
   const funSpend = summary?.funSpend || 0;
   const byCategory = summary?.byCategory || {};
 
-  const choiceCategories = Object.entries(byCategory)
-    .filter(([cat]) => !FUN_CATEGORIES.includes(cat) && cat !== 'Income' && byCategory[cat] > 0)
+  // Fun subcategories
+  const funBreakdown = FUN_CATEGORIES
+    .map(cat => ({ cat, amt: byCategory[cat] || 0 }))
+    .filter(({ amt }) => amt > 0);
+
+  // Other choice categories (not fun)
+  const otherCategories = Object.entries(byCategory)
+    .filter(([cat, amt]) => !FUN_CATEGORIES.includes(cat) && amt > 0 && cat !== 'undefined')
     .sort((a, b) => b[1] - a[1]);
 
-  const recentTxs = [...transactions].slice(0, 10);
+  const recentTxs = [...transactions]
+    .filter(t => t.type !== 'JTT')
+    .slice(0, 10);
 
-  const prevMonth = () => {
-    if (month === 1) { setMonth(12); setYear(y => y - 1); }
-    else setMonth(m => m - 1);
-  };
-  const nextMonth = () => {
-    if (month === 12) { setMonth(1); setYear(y => y + 1); }
-    else setMonth(m => m + 1);
+  const prevMonth = () => { if (month === 1) { setMonth(12); setYear(y => y - 1); } else setMonth(m => m - 1); };
+  const nextMonth = () => { if (month === 12) { setMonth(1); setYear(y => y + 1); } else setMonth(m => m + 1); };
+
+  const setTarget = (category, amount) => {
+    updateTarget.mutate({ month, year, category, target_amount: amount });
   };
 
   return (
@@ -51,20 +58,23 @@ export function Dashboard() {
       {/* Top bar */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={prevMonth} className="text-[#94A3B8] hover:text-white"><ChevronLeft size={18} /></button>
-          <h1 className="text-[#F1F5F9] text-lg font-semibold">{monthFull(month)} {year}</h1>
-          <button onClick={nextMonth} className="text-[#94A3B8] hover:text-white"><ChevronRight size={18} /></button>
+          <button onClick={prevMonth} className="text-[#94A3B8] hover:text-white transition-colors"><ChevronLeft size={18} /></button>
+          <h1 className="text-[#F1F5F9] text-lg font-semibold w-44 text-center">{monthFull(month)} {year}</h1>
+          <button onClick={nextMonth} className="text-[#94A3B8] hover:text-white transition-colors"><ChevronRight size={18} /></button>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-5">
           <MoneyMapScore score={summary?.moneyMapScore || 0} />
-          <div className="mono text-[#10B981] text-xl font-semibold">{fmt(income)}</div>
+          <div>
+            <div className="text-[#475569] text-xs">Income</div>
+            <div className="mono text-[#10B981] text-xl font-semibold leading-tight">{fmt(income)}</div>
+          </div>
           <FlagBell month={month} year={year} onClick={() => setShowFlags(s => !s)} />
         </div>
       </div>
 
-      {/* Flags panel */}
+      {/* Smart flags */}
       {showFlags && flags.length > 0 && (
-        <div className="mb-6 space-y-2">
+        <div className="mb-5 space-y-2">
           {flags.map((f, i) => (
             <div key={i} className={`flex items-start gap-3 p-3 rounded-lg border text-sm ${f.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' : 'bg-blue-500/10 border-blue-500/30 text-blue-300'}`}>
               <span>{f.message}</span>
@@ -72,33 +82,32 @@ export function Dashboard() {
           ))}
         </div>
       )}
+      {showFlags && flags.length === 0 && (
+        <div className="mb-5 p-3 rounded-lg border border-[#1E293B] text-[#475569] text-sm">No active flags this month.</div>
+      )}
 
       <div className="grid grid-cols-[2fr_3fr] gap-6">
-        {/* Left panel */}
+        {/* ── LEFT PANEL ─────────────────────────────────────────────────── */}
         <div className="space-y-4">
-          <Card>
-            <div className="text-[#94A3B8] text-xs uppercase tracking-wide mb-3">Income</div>
-            <div className="mono text-[#F1F5F9] text-2xl font-semibold mb-1">{fmt(income)}</div>
-          </Card>
-
+          {/* Metric cards */}
           <div className="grid grid-cols-2 gap-3">
             <MetricCard
               label="Core"
               value={fmt(core)}
               sub={income > 0 ? pct(core / income) + ' of income' : '—'}
-              status={core / income < 0.5 ? 'green' : core / income < 0.7 ? 'amber' : 'red'}
+              status={income > 0 ? (core / income < 0.5 ? 'green' : core / income < 0.65 ? 'amber' : 'red') : undefined}
             />
             <MetricCard
               label="Choice"
               value={fmt(choice)}
               sub={income > 0 ? pct(choice / income) + ' of income' : '—'}
-              status={choice / income < 0.25 ? 'green' : choice / income < 0.35 ? 'amber' : 'red'}
+              status={income > 0 ? (choice / income < 0.25 ? 'green' : choice / income < 0.35 ? 'amber' : 'red') : undefined}
             />
             <MetricCard
               label="Compound"
               value={fmt(compound)}
               sub={income > 0 ? pct(compound / income) + ' of income' : '—'}
-              status={compound / income >= 0.15 ? 'green' : 'amber'}
+              status={income > 0 ? (compound / income >= 0.15 ? 'green' : 'amber') : undefined}
             />
             <MetricCard
               label="Cash Remaining"
@@ -112,14 +121,16 @@ export function Dashboard() {
           <Card>
             <div className="text-[#94A3B8] text-xs uppercase tracking-wide mb-3">Recent</div>
             <div className="space-y-2">
-              {recentTxs.length === 0 && <div className="text-[#475569] text-sm">No transactions</div>}
+              {recentTxs.length === 0 && (
+                <div className="text-[#475569] text-sm">No transactions — go to Month to import.</div>
+              )}
               {recentTxs.map(t => (
                 <div key={t.id} className="flex justify-between items-start text-sm">
-                  <div>
-                    <div className="text-[#F1F5F9] truncate max-w-[160px]">{t.description}</div>
-                    <div className="text-[#475569] text-xs">{t.category}</div>
+                  <div className="min-w-0">
+                    <div className="text-[#F1F5F9] truncate">{t.description}</div>
+                    <div className="text-[#475569] text-xs">{t.date} · {t.category}</div>
                   </div>
-                  <div className={`mono font-medium ${t.type === 'Income' ? 'text-green-400' : 'text-[#F1F5F9]'}`}>
+                  <div className={`mono font-medium ml-3 shrink-0 ${t.type === 'Income' ? 'text-green-400' : 'text-[#F1F5F9]'}`}>
                     {t.type === 'Income' ? '+' : ''}{fmt(t.amount)}
                   </div>
                 </div>
@@ -128,67 +139,80 @@ export function Dashboard() {
           </Card>
         </div>
 
-        {/* Right panel */}
+        {/* ── RIGHT PANEL ────────────────────────────────────────────────── */}
         <div className="space-y-4">
-          {/* Fun Spend highlight */}
+          {/* Fun spend highlight */}
           <Card>
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-baseline mb-2">
               <div className="text-[#F1F5F9] font-medium">Dining & Entertainment</div>
-              <div className={`mono text-lg font-semibold ${funSpend / income > 0.25 ? 'text-red-400' : 'text-[#F1F5F9]'}`}>
+              <div className={`mono text-lg font-semibold ${income > 0 && funSpend / income > 0.25 ? 'text-red-400' : 'text-[#F1F5F9]'}`}>
                 {fmt(funSpend)}
-                {income > 0 && <span className="text-sm ml-2 text-[#94A3B8]">{pct(funSpend / income)}</span>}
+                {income > 0 && (
+                  <span className="text-sm ml-2 text-[#94A3B8]">{pct(funSpend / income)}</span>
+                )}
               </div>
             </div>
-            <div className="h-1 bg-[#1E293B] rounded-full overflow-hidden">
+            <div className="h-1 bg-[#1E293B] rounded-full overflow-hidden mb-1">
               <div
-                className={`h-full rounded-full ${funSpend / income > 0.25 ? 'bg-red-500' : funSpend / income > 0.15 ? 'bg-amber-500' : 'bg-green-500'}`}
-                style={{ width: `${Math.min((funSpend / income) / 0.25 * 100, 100)}%` }}
+                className={`h-full rounded-full ${income > 0 && funSpend / income > 0.25 ? 'bg-red-500' : income > 0 && funSpend / income > 0.15 ? 'bg-amber-500' : 'bg-green-500'}`}
+                style={{ width: income > 0 ? `${Math.min((funSpend / income) / 0.25 * 100, 100)}%` : '0%' }}
               />
             </div>
-            <div className="text-[#475569] text-xs mt-1">Target: 25% of income = {fmt(income * 0.25)}</div>
-            {/* Subcategory drill */}
-            <div className="mt-3 space-y-1 border-t border-[#1E293B] pt-3">
-              {FUN_CATEGORIES.map(cat => {
-                const amt = byCategory[cat] || 0;
-                return amt > 0 ? (
+            <div className="text-[#475569] text-xs mb-3">
+              Target: 25% = {fmt(income * 0.25)}
+            </div>
+            {funBreakdown.length > 0 && (
+              <div className="space-y-1 border-t border-[#1E293B] pt-3">
+                {funBreakdown.map(({ cat, amt }) => (
                   <div key={cat} className="flex justify-between text-sm">
                     <span className="text-[#94A3B8]">{cat}</span>
                     <span className="mono text-[#F1F5F9]">{fmt(amt)}</span>
                   </div>
-                ) : null;
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </Card>
 
-          {/* Budget bars */}
+          {/* Category budget bars */}
           <Card>
-            <div className="text-[#94A3B8] text-xs uppercase tracking-wide mb-3">Category Spend</div>
+            <div className="text-[#94A3B8] text-xs uppercase tracking-wide mb-1">
+              Category Spend
+              <span className="text-[#475569] normal-case font-normal ml-2">hover to set targets</span>
+            </div>
             <div className="divide-y divide-[#1E293B]">
-              {choiceCategories.map(([cat, spent]) => (
-                <BudgetBar key={cat} category={cat} spent={spent} budget={targetMap[cat] || 0} />
+              {otherCategories.map(([cat, spent]) => (
+                <BudgetBar
+                  key={cat}
+                  category={cat}
+                  spent={spent}
+                  budget={targetMap[cat] || 0}
+                  onSetBudget={amt => setTarget(cat, amt)}
+                />
               ))}
-              {choiceCategories.length === 0 && <div className="text-[#475569] text-sm py-2">No spend data — import transactions to get started.</div>}
+              {otherCategories.length === 0 && (
+                <div className="text-[#475569] text-sm py-3">Import transactions to see category breakdown.</div>
+              )}
             </div>
           </Card>
 
-          {/* Bottom strip */}
+          {/* JTT + Wealth strip */}
           <div className="grid grid-cols-3 gap-3">
             <MetricCard
               label="JTT P&L YTD"
               value={fmt(jttAnalytics?.realisedPnl || 0)}
-              sub={`${jttAnalytics?.holdingCount || 0} holding`}
+              sub={`${jttAnalytics?.soldCount || 0} deals sold`}
               status={(jttAnalytics?.realisedPnl || 0) >= 0 ? 'green' : 'red'}
             />
             <MetricCard
               label="Capital at Risk"
               value={fmt(jttAnalytics?.capitalAtRisk || 0)}
-              sub={`${jttAnalytics?.holdingCount || 0} events`}
+              sub={`${jttAnalytics?.holdingCount || 0} events holding`}
               status="amber"
             />
             <MetricCard
               label="Win Rate"
               value={pct(jttAnalytics?.winRate || 0)}
-              sub={`${jttAnalytics?.soldCount || 0} sold`}
+              sub={`avg ${fmt(jttAnalytics?.avgProfit || 0)}/deal`}
               status={(jttAnalytics?.winRate || 0) >= 0.7 ? 'green' : 'amber'}
             />
           </div>

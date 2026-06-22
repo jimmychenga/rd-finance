@@ -9,7 +9,8 @@
     "build": "cd client && npm run build",
     "start": "cd server && npm start",
     "db:seed": "cd server && node src/db/seed.js",
-    "db:reset": "cd server && node src/db/reset.js"
+    "db:reset": "cd server && node src/db/reset.js",
+    "import:historical": "python3 server/scripts/import_historical.py"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
