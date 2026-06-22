@@ -1,0 +1,17 @@
+{
+  "name": "rd-finance",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "db:seed": "cd server && node src/db/seed.js",
+    "db:reset": "cd server && node src/db/reset.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
